@@ -1,126 +1,86 @@
-import * as fs from 'node:fs';
+import * as fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 import { consola } from 'consola';
-import merge from 'deepmerge';
 import stringify from 'json-stringify-pretty-compact';
-import { parseHTML } from 'linkedom';
 import { dirname, join } from 'pathe';
-import { chromium } from 'playwright';
 
-import type { FontObjectVariableDirect } from './types';
+import { isIconFont, stripIconsApiGen } from './icons-gen';
+import { APIResponse, AxesFontObject, FontObjectVariableDirect } from './types';
 
-const url = 'https://fonts.google.com/variablefonts#font-families';
+interface APIResponseVF extends APIResponse {
+  axes?: Array<{
+    tag: string;
+    start: number;
+    end: number;
+  }>;
+}
 
-export const scrapeSelector = (
-	selector: string,
-	document: Document,
-): string[] => {
-	const arr = [];
-	// Scrape section using classnames
-	for (const [index, element] of document
-		.querySelectorAll(selector)
-		.entries()) {
-		const value = element.textContent?.trim();
-		if (index !== 0 && value) {
-			arr.push(value);
-		}
-	}
-	return arr;
+interface APIGenResponseVF {
+  items: APIResponseVF[];
+}
+
+const fetchURL = async (url: string): Promise<void> => {
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    throw new Error(
+      `Response code ${response.status} (${response.statusText})`,
+    );
+  }
+
+  const items = (await response.json()) as APIGenResponseVF;
+
+  // Before google had this API, we were getting this data by
+  // scraping. For backwards compatibility, we need to transform
+  // the data here.
+  const finalArray: FontObjectVariableDirect[] = [];
+  for (const font of items.items) {
+    if (!font.axes || isIconFont(font.family)) continue;
+    const newAxes: AxesFontObject = {};
+    for (const axis of font.axes) {
+      newAxes[axis.tag] = {
+        min: axis.start.toString(),
+        max: axis.end.toString(),
+        step: '1',
+        default: '500',
+      };
+    }
+
+    finalArray.push({
+      family: font.family,
+      id: font.family.replaceAll(/\s/g, '-').toLowerCase(),
+      axes: newAxes,
+    });
+  }
+
+  await fs.writeFile(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      '../data/variable-response.json',
+    ),
+    stringify(finalArray),
+  );
 };
 
-const processTable = (tableHTML: string) => {
-	const { document } = parseHTML(tableHTML);
-
-	// Use linkedom to store all relevant values in matching index arrays
-	const fontNames = scrapeSelector(
-		'.cdk-column-fontFamily.mat-column-fontFamily',
-		document,
-	);
-	// Hello World => hello-world
-	const fontIds = fontNames.map((val) =>
-		val.replaceAll(/\s/g, '-').toLowerCase(),
-	);
-
-	const axes = scrapeSelector('.cdk-column-axes.mat-column-axes', document);
-	const defaults = scrapeSelector(
-		'.cdk-column-defaultValue.mat-column-defaultValue',
-		document,
-	);
-	const min = scrapeSelector('.cdk-column-min.mat-column-min', document);
-	const max = scrapeSelector('.cdk-column-max.mat-column-max', document);
-	const step = scrapeSelector('.cdk-column-step.mat-column-step', document);
-
-	// Build variable font object
-	type ResultsObject = Record<string, FontObjectVariableDirect>;
-
-	let results = {} as ResultsObject;
-	for (const [index, id] of fontIds.entries()) {
-		const variableObject = {
-			[id]: {
-				family: fontNames[index],
-				id,
-				axes: {
-					[axes[index]]: {
-						default: defaults[index],
-						min: min[index],
-						max: max[index],
-						step: step[index],
-					},
-				},
-			},
-		};
-
-		// Different types of axes for the same font would generate duplicate font objects.
-		// This merges a bitter.axes.ital and bitter.axes.wght into the same object when previously they were in separate 'bitter' objects.
-		results = merge(results, variableObject);
-	}
-
-	const writeArray = [];
-	for (const key of Object.keys(results)) {
-		writeArray.push(results[key]);
-	}
-
-	if (writeArray.length === 0) {
-		throw new Error('No variable font datapoints found.');
-	}
-
-	fs.writeFileSync(
-		join(
-			dirname(fileURLToPath(import.meta.url)),
-			'../data/variable-response.json',
-		),
-		stringify(writeArray),
-	);
-
-	consola.success(
-		`All ${writeArray.length} variable font datapoints have been fetched.`,
-	);
-};
+const baseurl =
+  'https://www.googleapis.com/webfonts/v1/webfonts?capability=VF&fields=items(category%2Cfamily%2ClastModified%2Csubsets%2Cvariants%2Cversion%2Caxes)&key=';
 
 /**
- * This scrapes the Google Fonts Variable Font page for all the basic metadata available.
+ * This fetches the Google Fonts Developer API for all the basic metadata available.
  *
- * {@link https://fonts.google.com/variablefonts}
+ * {@link https://developers.google.com/fonts/docs/developer_api#variable_fonts}
+ * @param key Google API key
  */
-export const fetchVariable = async () => {
-	// Need to use Playwright to let JavaScript load page elements fully
-	const browser = await chromium.launch({ headless: true });
-	const page = await browser.newPage();
-	await page.goto(url, { waitUntil: 'networkidle' });
-
-	const tableHTML = await page.evaluate(() => {
-		const selector = document.querySelector(
-			'#font-families > gf-font-families > table',
-		);
-
-		if (!selector) {
-			throw new Error('variable selector not found');
-		}
-
-		return selector.outerHTML;
-	});
-	await browser.close();
-
-	processTable(tableHTML);
+export const fetchVariable = async (key: string) => {
+  if (key) {
+    try {
+      await fetchURL(baseurl + key);
+      consola.success('Successful Google Font API fetch (Variable fonts).');
+    } catch (error) {
+      throw new Error(`API fetch error: ${String(error)}`);
+    }
+  } else {
+    throw new Error('The API key is required!');
+  }
 };

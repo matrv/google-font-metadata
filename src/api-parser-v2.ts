@@ -91,8 +91,7 @@ export const processCSS = (
 	const id = font.family.replaceAll(/\s/g, '-').toLowerCase();
 	const defSubset = font.subsets.includes('latin') ? 'latin' : font.subsets[0];
 
-	const normalizeUnicodeRange = (value: string) =>
-		value.replaceAll(/\s/g, '');
+	const normalizeUnicodeRange = (value: string) => value.replaceAll(/\s/g, '');
 
 	const findSubsetByUnicodeRange = (
 		unicodeRangeMap: Record<string, string>,

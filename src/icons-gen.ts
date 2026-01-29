@@ -76,3 +76,7 @@ export const stripIconsApiGen = async (
 
 	return stripped;
 };
+
+export const isIconFont = (fontFamily: string) => {
+	return iconFamilies.has(fontFamily) || variableIconFamilies.has(fontFamily);
+};

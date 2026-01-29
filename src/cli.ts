@@ -27,10 +27,10 @@ cli
 				await fetchAPI(finalKey);
 			} else if (options.variable) {
 				consola.info('Fetching Google Fonts Variable Data...');
-				await fetchVariable();
+				await fetchVariable(finalKey);
 			} else {
 				consola.info('Fetching all Google Fonts Data...');
-				await Promise.all([fetchAPI(finalKey), fetchVariable()]);
+				await Promise.all([fetchAPI(finalKey), fetchVariable(finalKey)]);
 			}
 		} catch (error) {
 			consola.error(error);
